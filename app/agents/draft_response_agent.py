@@ -1,117 +1,154 @@
+# app/agents/draft_response_agent.py
+
 import os
 import openai
-import json
-import time
-from typing import Dict, Any
+import asyncio
+import traceback
+from typing import Dict, Any, Optional, TypedDict
+from openai.error import AuthenticationError, RateLimitError, OpenAIError
 from dotenv import load_dotenv
-from app.agents.base_agent import BaseAgent
+from app.agents.base_agent import BaseAgent, AgentInput, AgentOutput
+from app.utils.logger import logger
+from app.agents.enums import ToneStyle
 
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+
+
+class DraftResponseInput(AgentInput, total=False):
+    classification: Dict[str, Any]  # Should later use TypedDict or TypedModel
+
+
+class DraftResponseOutput(AgentOutput):
+    reply_draft: str
 
 
 class DraftResponseAgent(BaseAgent):
     """
-    Agent that takes classified message data and returns a smart draft reply.
+    AI agent that generates draft replies based on classified messages.
     """
 
-    def __init__(self):
-        super().__init__(name="DraftResponseAgent")
+    name: str = "DraftResponseAgent"
+    version: str = "1.0.0"
+    fallback_config: Dict[str, Any] = {
+        "reply_draft": "Thank you for your message. We are reviewing your request and will follow up shortly.",
+        "confidence": 0.0
+    }
 
-    def run(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+    def __init__(self, openai_client: Optional[Any] = None, model: str = "gpt-4", temperature: float = 0.4, max_tokens: int = 300):
+        super().__init__()
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.client = openai_client or openai
+
+        if not os.getenv("OPENAI_API_KEY"):
+            raise EnvironmentError("OPENAI_API_KEY not set")
+
+    def preprocess(self, input_data: DraftResponseInput) -> None:
         """
-        Expected input:
-        {
-            "sender": "email@example.com",
-            "content": "original message body...",
-            "classification": {
-                "category": "...",
-                "priority": "...",
-                "intent": "...",
-                "recommended_queue": "...",
-                "confidence": 0.87
-            }
-        }
-
-        Returns:
-        {
-            "reply_draft": "Hello, thanks for your message...",
-            "confidence": 0.92
-        }
+        Validate classification and sanitize content.
         """
-
-        # Extract info
-        content = input_data.get("content", "")
         classification = input_data.get("classification", {})
+        required_keys = ["category", "intent"]
 
-        # Prompt building
-        prompt = self._build_prompt(content, classification)
+        for key in required_keys:
+            if key not in classification:
+                raise ValueError(f"Missing classification field: {key}")
 
-        # Call LLM
+        if not input_data.get("content"):
+            raise ValueError("Missing message content")
+
+    def run(self, input_data: DraftResponseInput) -> DraftResponseOutput:
+        """
+        Compose a reply using the classification context and LLM prompt.
+        """
         try:
-            start = time.time()
+            classification = input_data["classification"]
+            content = self._sanitize(input_data["content"])
+            tone = self._infer_tone(classification)
+            prompt = self._build_prompt(content, classification, tone)
 
-            response = openai.ChatCompletion.create(
-                model="gpt-4",
+            logger.info(f"[DraftPrompt] Tone: {tone} | Intent: {classification.get('intent')}")
+
+            response = self.client.ChatCompletion.create(
+                model=self.model,
                 messages=[
                     {"role": "system", "content": "You are a helpful and professional customer support assistant."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.4,
-                max_tokens=300
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
             )
 
-            reply = response["choices"][0]["message"]["content"]
-            latency = round((time.time() - start) * 1000, 2)
-
+            reply = response["choices"][0]["message"]["content"].strip()
             return {
-                "reply_draft": reply.strip(),
-                "confidence": 0.92,  # You could infer this from classification.confidence
-                "latency_ms": latency,
-                "fallback_used": False
+                "reply_draft": self._process_reply(reply),
+                "confidence": classification.get("confidence", 0.85),
+                "fallback_used": False,
+                "error": None
             }
 
+        except (AuthenticationError, RateLimitError, OpenAIError) as api_err:
+            logger.error(f"[OpenAI Error] {str(api_err)}")
+            raise
         except Exception as e:
-            return self.fallback(reason=str(e))
+            logger.exception("[DraftAgent] Unexpected failure")
+            raise
 
-    def _build_prompt(self, message_content: str, classification: Dict[str, str]) -> str:
+    def fallback(self, reason: str, latency: float = 0.0) -> DraftResponseOutput:
         """
-        Dynamically builds a prompt for the LLM based on the message and its classification.
+        Return default reply message with error context.
         """
-        category = classification.get("category", "General Inquiry")
-        intent = classification.get("intent", "Unclear")
-        tone = self._infer_tone(category, intent)
+        return {
+            "reply_draft": self.fallback_config["reply_draft"],
+            "confidence": self.fallback_config["confidence"],
+            "fallback_used": True,
+            "error": reason,
+            "_agent": self.name,
+            "_version": self.version,
+            "_latency_ms": latency
+        }
 
+    def _build_prompt(self, content: str, classification: Dict[str, Any], tone: str) -> str:
         return f"""
-You are an AI trained to write professional, polite, and helpful draft replies to incoming customer messages.
+You are an AI assistant trained to write clear, empathetic, and professional email replies to incoming client messages.
 
-Use this classification to inform your tone and content:
-- Category: {category}
-- Intent: {intent}
+Use the following classification context to shape your response:
+- Category: {classification.get('category')}
+- Intent: {classification.get('intent')}
+- Tone: {tone}
 
-The goal is to draft a message that:
-- Is clear, courteous, and anticipatory
-- Acknowledges the issue
-- Reassures the user action will be taken
-- Keeps the tone {tone}
+Here is the client's original message:
+"""
+{content}
+"""
 
---- Incoming Message ---
-{message_content}
---- End Message ---
-
-Respond ONLY with the reply message. Do not include JSON or explanation.
+Reply in a helpful tone. Do not include headers or disclaimers.
 """.strip()
 
-    def _infer_tone(self, category: str, intent: str) -> str:
+    def _infer_tone(self, classification: Dict[str, str]) -> str:
         """
-        Simple tone logic for different contexts.
+        Return a tone style string based on classification.
         """
-        if category == "Billing Support":
-            return "reassuring and precise"
-        if category == "Sensor Alert":
-            return "calm and technically confident"
-        if category == "Dispatch Communication":
-            return "prompt and respectful"
-        if "unsubscribe" in intent.lower():
-            return "brief and compliant"
-        return "neutral and helpful"
+        category = classification.get("category", "General Inquiry")
+        tone_map = {
+            "Billing Support": "reassuring and precise",
+            "Sensor Alert": "calm and technically confident",
+            "Dispatch Communication": "prompt and respectful",
+            "Marketing": "brief and compliant",
+            "General Inquiry": "neutral and helpful"
+        }
+        return tone_map.get(category, "neutral and helpful")
+
+    def _sanitize(self, text: str) -> str:
+        """
+        Strip problematic characters, truncate if overly long.
+        """
+        clean = text.replace("\n", " ").strip()
+        return clean[:2000]  # soft limit
+
+    def _process_reply(self, reply: str) -> str:
+        """
+        Final cleanup: ensure formatting, trim overages.
+        """
+        return reply.strip()[:1000]  # cap overly verbose replies
