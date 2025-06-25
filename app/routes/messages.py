@@ -1,51 +1,55 @@
-from fastapi import APIRouter, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Request, HTTPException
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any
 from app.schemas.message import Message
 from app.agents.classify_agent import classify_message
+from app.agents.draft_response_agent import DraftResponseAgent
 from app.utils.logger import logger
-from datetime import datetime
 
 router = APIRouter()
 
+# ----------- Models -----------
 
-@router.post("/classify", summary="Classify a communication message", response_description="Classification result")
-async def classify_message_route(request: Request, msg: Message):
+class DraftRequest(BaseModel):
+    sender: str
+    content: str
+    classification: Dict[str, Any] = Field(..., description="Pre-classified metadata for this message")
+
+
+class DraftResponse(BaseModel):
+    reply_draft: str
+    confidence: float
+    latency_ms: float
+    fallback_used: bool
+    error: Optional[str] = None
+
+# ----------- Routes -----------
+
+@router.post("/classify", summary="Classify a message", tags=["Classification"])
+def classify(msg: Message):
     """
-    Classify a message for DSQ Technology use cases.
-    
-    The agent will analyze the message content and metadata to determine:
-    - Category (e.g. 'Billing Support', 'Sensor Alert')
-    - Priority (High, Medium, Low)
-    - Intent (user's goal or issue)
-    - Recommended queue/team to handle the message
-    - Confidence score from classification model
-    
-    Examples of supported product types:
-    - Discovery (billing & audit support)
-    - Hauler (dispatch/scheduling)
-    - Pioneer (sensor/monitoring alerts)
+    Takes a raw message and returns classification metadata.
     """
     try:
-        logger.info(f"[{datetime.utcnow()}] New message received from {msg.sender}")
-
+        logger.info(f"[Classify] Message received from {msg.sender}")
         result = classify_message(msg.dict())
-
-        logger.info(f"[{datetime.utcnow()}] Classification result: {result}")
-
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "success": True,
-                "input_summary": {
-                    "sender": msg.sender,
-                    "subject": msg.subject,
-                    "product": msg.product,
-                    "channel": msg.channel
-                },
-                "classification": result
-            }
-        )
-
+        logger.info(f"[Classify] Classification result: {result}")
+        return {"classification": result}
     except Exception as e:
-        logger.error(f"Error during classification: {e}")
-        raise HTTPException(status_code=500, detail="Classification failed")
+        logger.exception("[Classify] Failed to classify")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/draft", response_model=DraftResponse, summary="Generate a reply draft", tags=["Drafting"])
+def generate_draft(body: DraftRequest):
+    """
+    Takes a message + classification and returns a smart AI-generated reply draft.
+    """
+    try:
+        logger.info(f"[Draft] Generating reply for sender {body.sender}")
+        agent = DraftResponseAgent()
+        result = agent.execute(body.dict())
+        return result
+    except Exception as e:
+        logger.exception("[Draft] Failed to generate reply")
+        raise HTTPException(status_code=500, detail=str(e))
