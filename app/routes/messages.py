@@ -80,3 +80,47 @@ async def classify_message(payload: RawMessageInput, request: Request):
     except Exception as e:
         logger.exception("[ClassifyRoute] Failure during classification")
         raise HTTPException(status_code=500, detail="Classification agent failed to process message")
+
+class TriageInput(BaseModel):
+    sender: str = Field(..., example="casey@example.com")
+    content: str = Field(..., example="Can you help me cancel my plan?")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+class TriageOutput(BaseModel):
+    classification: ClassificationOutput
+    draft: MessageOutput
+
+@router.post("/triage", response_model=TriageOutput, summary="Classify and generate a draft reply", tags=["Messages"])
+async def triage_message(payload: TriageInput, request: Request):
+    request_id = getattr(request.state, "request_id", "unknown")
+    client_ip = request.client.host
+
+    try:
+        # Step 1: Classify
+        classify_agent.set_metadata({"request_id": request_id, "ip": client_ip})
+        logger.info(f"[Triage] Classifying message from {payload.sender}")
+        classification_result = classify_agent.execute({
+            "sender": payload.sender,
+            "content": payload.content,
+            "metadata": payload.metadata
+        })
+
+        # Step 2: Generate Draft
+        draft_agent.set_metadata({"request_id": request_id, "ip": client_ip})
+        logger.info(f"[Triage] Drafting reply for {payload.sender}")
+        draft_result = draft_agent.execute({
+            "sender": payload.sender,
+            "content": payload.content,
+            "classification": classification_result,
+            "metadata": payload.metadata
+        })
+
+        return {
+            "classification": classification_result,
+            "draft": draft_result
+        }
+
+    except Exception as e:
+        logger.exception("[TriageRoute] Failure during triage processing")
+        raise HTTPException(status_code=500, detail="Triage agent failed to process message")
+
