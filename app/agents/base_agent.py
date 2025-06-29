@@ -3,7 +3,9 @@ import traceback
 from abc import ABC, abstractmethod
 from typing import Any, Optional, TypedDict, Dict
 from enum import Enum
+from uuid import uuid4
 from app.utils.logger import logger
+from app.utils.agent_logger import log_agent_event
 
 # ---------------- Enums for Type Safety ----------------
 
@@ -60,17 +62,6 @@ class Timer:
 # ---------------- Base Agent ----------------
 
 class BaseAgent(ABC):
-    """
-    The foundational class for all intelligent agents in the Triage system.
-
-    Responsibilities:
-    - Enforces a consistent interface across agents
-    - Handles fallback and error resilience
-    - Captures runtime and structured output
-    - Validates I/O types and confidence
-    - Supports lifecycle hooks and extensibility
-    """
-
     name: str = "BaseAgent"
     version: str = "1.0"
     fallback_config: Dict[str, Any] = {
@@ -85,16 +76,8 @@ class BaseAgent(ABC):
         self.metadata = metadata or {}
 
     def execute(self, input_data: AgentInput) -> AgentOutput:
-        """
-        Run the agent with error handling and timing.
-
-        Args:
-            input_data: Dict with keys sender, content, classification (optional)
-
-        Returns:
-            AgentOutput: structured classification or draft result
-        """
         self._validate_input(input_data)
+        request_id = str(uuid4())
 
         with Timer() as timer:
             try:
@@ -102,7 +85,6 @@ class BaseAgent(ABC):
                 result = self.run(input_data)
                 self.postprocess(result)
 
-                # Ensure confidence is valid
                 result["confidence"] = min(max(result.get("confidence", 0.0), 0.0), 1.0)
                 result.update({
                     "_agent": self.name,
@@ -111,24 +93,37 @@ class BaseAgent(ABC):
                     "fallback_used": result.get("fallback_used", False),
                     "error": result.get("error")
                 })
+
+                log_agent_event(
+                    agent_name=self.name,
+                    input_data=input_data,
+                    output_data=result,
+                    fallback_used=False,
+                    request_id=request_id
+                )
+
                 return result  # type: ignore
 
             except Exception as e:
                 logger.exception(f"[{self.name}] Unhandled error during execution")
-                return self.fallback(str(e), timer.latency_ms)
+                fallback = self.fallback(str(e), timer.latency_ms)
+
+                log_agent_event(
+                    agent_name=self.name,
+                    input_data=input_data,
+                    output_data=fallback,
+                    fallback_used=True,
+                    error=str(e),
+                    request_id=request_id
+                )
+
+                return fallback
 
     @abstractmethod
     def run(self, input_data: AgentInput) -> AgentOutput:
-        """
-        Core agent logic implemented by all subclasses.
-        Must return a valid AgentOutput.
-        """
         pass
 
     def fallback(self, reason: str, latency: float = 0.0) -> AgentOutput:
-        """
-        Default fallback response structure with error context.
-        """
         logger.warning(f"[{self.name}] Using fallback due to: {reason}")
 
         return {
@@ -145,15 +140,9 @@ class BaseAgent(ABC):
         }
 
     def preprocess(self, input_data: AgentInput) -> None:
-        """
-        Optional hook: Normalize or augment input before running.
-        """
         pass
 
     def postprocess(self, result: Dict[str, Any]) -> None:
-        """
-        Optional hook: Cleanup or enrich result before returning.
-        """
         pass
 
     def _validate_input(self, input_data: AgentInput) -> None:
