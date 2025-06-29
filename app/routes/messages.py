@@ -1,5 +1,3 @@
-# app/routes/messages.py
-
 from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
@@ -8,14 +6,14 @@ from app.agents.classify_agent import ClassifyAgent
 from app.agents.base_agent import BaseAgent
 from app.utils.logger import logger
 
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/messages", tags=["Messages"])
 
 # ----------- Pydantic Models --------------
 
 class ClassificationInput(BaseModel):
-    category: str
-    intent: str
-    confidence: Optional[float] = 0.85
+    category: str = Field(..., example="Billing Support")
+    intent: str = Field(..., example="Refund Request")
+    confidence: Optional[float] = Field(0.85, ge=0.0, le=1.0)
 
 class MessageInput(BaseModel):
     sender: str = Field(..., example="jane.doe@example.com")
@@ -25,15 +23,16 @@ class MessageInput(BaseModel):
 class RawMessageInput(BaseModel):
     sender: str = Field(..., example="john@example.com")
     content: str = Field(..., example="I need support with my account.")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class MessageOutput(BaseModel):
     reply_draft: str
     confidence: float
     fallback_used: bool
-    error: Optional[str]
-    _agent: Optional[str]
-    _version: Optional[str]
-    _latency_ms: Optional[float]
+    error: Optional[str] = None
+    _agent: Optional[str] = None
+    _version: Optional[str] = None
+    _latency_ms: Optional[float] = None
 
 class ClassificationOutput(BaseModel):
     category: str
@@ -42,47 +41,42 @@ class ClassificationOutput(BaseModel):
     recommended_queue: str
     confidence: float
     fallback_used: bool
-    error: Optional[str]
-    _agent: Optional[str]
-    _version: Optional[str]
-    _latency_ms: Optional[float]
+    error: Optional[str] = None
+    _agent: Optional[str] = None
+    _version: Optional[str] = None
+    _latency_ms: Optional[float] = None
 
 # ----------- Agent Instances --------------
+
 draft_agent: BaseAgent = DraftResponseAgent()
 classify_agent: BaseAgent = ClassifyAgent()
 
 # ----------- API Endpoints --------------
 
-@router.post("/draft", response_model=MessageOutput, summary="Generate draft reply", tags=["Messages"])
+@router.post("/draft", response_model=MessageOutput, summary="Generate draft reply to a classified message")
 async def draft_reply(payload: MessageInput, request: Request):
     try:
         draft_agent.set_metadata({
             "request_id": getattr(request.state, "request_id", "unknown"),
             "ip": request.client.host
         })
-
-        logger.info(f"[DraftRoute] Processing message from {payload.sender}")
-
+        logger.info(f"[DraftRoute] Processing message from: {payload.sender}")
         result = draft_agent.execute(payload.dict())
         return result
-
     except Exception as e:
-        logger.exception("[DraftRoute] Failure in draft endpoint")
-        raise HTTPException(status_code=500, detail="Agent failed to generate a draft reply")
+        logger.exception("[DraftRoute] Failure during draft generation")
+        raise HTTPException(status_code=500, detail="Draft agent failed to generate a response")
 
-@router.post("/classify", response_model=ClassificationOutput, summary="Classify an inbound message", tags=["Messages"])
+@router.post("/classify", response_model=ClassificationOutput, summary="Classify an inbound message by category, intent, and routing")
 async def classify_message(payload: RawMessageInput, request: Request):
     try:
         classify_agent.set_metadata({
             "request_id": getattr(request.state, "request_id", "unknown"),
             "ip": request.client.host
         })
-
-        logger.info(f"[ClassifyRoute] Classifying message from {payload.sender}")
-
+        logger.info(f"[ClassifyRoute] Classifying message from: {payload.sender}")
         result = classify_agent.execute(payload.dict())
         return result
-
     except Exception as e:
-        logger.exception("[ClassifyRoute] Failure in classify endpoint")
-        raise HTTPException(status_code=500, detail="Agent failed to classify message")
+        logger.exception("[ClassifyRoute] Failure during classification")
+        raise HTTPException(status_code=500, detail="Classification agent failed to process message")
