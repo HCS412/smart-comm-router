@@ -1,37 +1,36 @@
-# app/agents/draft_response_agent.py
-
 import os
 import openai
-import asyncio
 import traceback
-from typing import Dict, Any, Optional, TypedDict
+from typing import Dict, Any, Optional
 from openai.error import AuthenticationError, RateLimitError, OpenAIError
 from dotenv import load_dotenv
 from app.agents.base_agent import BaseAgent, AgentInput, AgentOutput
-from app.utils.logger import logger
+from app.utils.logger import logger, log_agent_event
 from app.agents.enums import ToneStyle
 
 load_dotenv()
 
+# ---------------- Draft Response Types ----------------
 
 class DraftResponseInput(AgentInput, total=False):
-    classification: Dict[str, Any]  # Should later use TypedDict or TypedModel
-
+    classification: Dict[str, Any]
 
 class DraftResponseOutput(AgentOutput):
     reply_draft: str
 
+# ---------------- Draft Response Agent ----------------
 
 class DraftResponseAgent(BaseAgent):
-    """
-    AI agent that generates draft replies based on classified messages.
-    """
-
     name: str = "DraftResponseAgent"
     version: str = "1.0.0"
+
     fallback_config: Dict[str, Any] = {
         "reply_draft": "Thank you for your message. We are reviewing your request and will follow up shortly.",
-        "confidence": 0.0
+        "category": "General Inquiry",
+        "priority": "Medium",
+        "intent": "Unknown",
+        "recommended_queue": "Customer Support",
+        "confidence": 0.0,
     }
 
     def __init__(self, openai_client: Optional[Any] = None, model: str = "gpt-4", temperature: float = 0.4, max_tokens: int = 300):
@@ -45,9 +44,6 @@ class DraftResponseAgent(BaseAgent):
             raise EnvironmentError("OPENAI_API_KEY not set")
 
     def preprocess(self, input_data: DraftResponseInput) -> None:
-        """
-        Validate classification and sanitize content.
-        """
         classification = input_data.get("classification", {})
         required_keys = ["category", "intent"]
 
@@ -59,17 +55,14 @@ class DraftResponseAgent(BaseAgent):
             raise ValueError("Missing message content")
 
     def run(self, input_data: DraftResponseInput) -> DraftResponseOutput:
-        """
-        Compose a reply using the classification context and LLM prompt.
-        """
+        classification = input_data["classification"]
+        content = self._sanitize(input_data["content"])
+        tone = self._infer_tone(classification)
+        prompt = self._build_prompt(content, classification, tone)
+
+        logger.info(f"[DraftPrompt] Tone: {tone} | Intent: {classification.get('intent')}")
+
         try:
-            classification = input_data["classification"]
-            content = self._sanitize(input_data["content"])
-            tone = self._infer_tone(classification)
-            prompt = self._build_prompt(content, classification, tone)
-
-            logger.info(f"[DraftPrompt] Tone: {tone} | Intent: {classification.get('intent')}")
-
             response = self.client.ChatCompletion.create(
                 model=self.model,
                 messages=[
@@ -81,33 +74,44 @@ class DraftResponseAgent(BaseAgent):
             )
 
             reply = response["choices"][0]["message"]["content"].strip()
-            return {
+            output: DraftResponseOutput = {
                 "reply_draft": self._process_reply(reply),
                 "confidence": classification.get("confidence", 0.85),
                 "fallback_used": False,
-                "error": None
+                "error": None,
+                "category": classification.get("category", "General Inquiry"),
+                "priority": classification.get("priority", "Medium"),
+                "intent": classification.get("intent", "Unknown"),
+                "recommended_queue": classification.get("recommended_queue", "Customer Support"),
+                "_agent": self.name,
+                "_version": self.version,
+                "_latency_ms": 0.0  # Will be overwritten
             }
+            return output
 
         except (AuthenticationError, RateLimitError, OpenAIError) as api_err:
             logger.error(f"[OpenAI Error] {str(api_err)}")
             raise
+
         except Exception as e:
             logger.exception("[DraftAgent] Unexpected failure")
             raise
 
     def fallback(self, reason: str, latency: float = 0.0) -> DraftResponseOutput:
-        """
-        Return default reply message with error context.
-        """
-        return {
+        fallback_response: DraftResponseOutput = {
             "reply_draft": self.fallback_config["reply_draft"],
             "confidence": self.fallback_config["confidence"],
             "fallback_used": True,
             "error": reason,
+            "category": self.fallback_config["category"],
+            "priority": self.fallback_config["priority"],
+            "intent": self.fallback_config["intent"],
+            "recommended_queue": self.fallback_config["recommended_queue"],
             "_agent": self.name,
             "_version": self.version,
             "_latency_ms": latency
         }
+        return fallback_response
 
     def _build_prompt(self, content: str, classification: Dict[str, Any], tone: str) -> str:
         return f"""
@@ -119,17 +123,12 @@ Use the following classification context to shape your response:
 - Tone: {tone}
 
 Here is the client's original message:
-"""
 {content}
-"""
 
 Reply in a helpful tone. Do not include headers or disclaimers.
 """.strip()
 
     def _infer_tone(self, classification: Dict[str, str]) -> str:
-        """
-        Return a tone style string based on classification.
-        """
         category = classification.get("category", "General Inquiry")
         tone_map = {
             "Billing Support": "reassuring and precise",
@@ -141,14 +140,8 @@ Reply in a helpful tone. Do not include headers or disclaimers.
         return tone_map.get(category, "neutral and helpful")
 
     def _sanitize(self, text: str) -> str:
-        """
-        Strip problematic characters, truncate if overly long.
-        """
         clean = text.replace("\n", " ").strip()
-        return clean[:2000]  # soft limit
+        return clean[:2000]
 
     def _process_reply(self, reply: str) -> str:
-        """
-        Final cleanup: ensure formatting, trim overages.
-        """
-        return reply.strip()[:1000]  # cap overly verbose replies
+        return reply.strip()[:1000]
