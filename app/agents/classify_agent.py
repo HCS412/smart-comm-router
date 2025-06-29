@@ -1,106 +1,105 @@
 import os
 import openai
-import json
+import traceback
+from typing import Dict, Any, Optional
+from openai.error import AuthenticationError, RateLimitError, OpenAIError
 from dotenv import load_dotenv
+from app.agents.base_agent import BaseAgent, AgentInput, AgentOutput
 from app.utils.logger import logger
+from app.agents.enums import PriorityLevel, CategoryType, QueueType
 
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# ---------- 1. Prompt Construction ----------
-def build_prompt(msg: dict) -> str:
+class ClassificationAgent(BaseAgent):
     """
-    Build a detailed, structured prompt for DSQ’s AI message triage system.
+    AI agent that classifies incoming communications into actionable metadata fields:
+    - category
+    - intent
+    - priority
+    - recommended_queue
     """
-    subject = msg.get("subject", "(no subject)")
-    product = msg.get("product", "Unknown")
-    content = msg.get("content", "")
-    sender = msg.get("sender", "Unknown")
 
-    return f"""
-You are an AI assistant working for **DSQ Technology**, which manages:
-- Discovery: automated invoice auditing & billing support
-- Hauler: roll-off dispatch scheduling, ETA coordination
-- Pioneer: compactor sensors and monitoring alerts
+    name: str = "ClassificationAgent"
+    version: str = "1.0.0"
+    fallback_config: Dict[str, Any] = {
+        "category": CategoryType.GENERAL,
+        "priority": PriorityLevel.MEDIUM,
+        "intent": "Unknown",
+        "recommended_queue": QueueType.SUPPORT,
+        "confidence": 0.0
+    }
 
-Given a message, your job is to return a structured classification object with:
-- "category": What type of issue this is (e.g. 'Billing', 'Dispatch', 'Sensor Alert')
-- "priority": High, Medium, or Low
-- "intent": Specific problem or user goal (e.g. 'Invoice Dispute', 'Pickup ETA')
-- "recommended_queue": Which team should handle this (e.g. 'Finance', 'Dispatch')
-- "confidence": float between 0.0 and 1.0 based on how certain you are
+    def __init__(self, openai_client: Optional[Any] = None, model: str = "gpt-4", temperature: float = 0.3, max_tokens: int = 400):
+        super().__init__()
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.client = openai_client or openai
 
-You MUST respond with valid JSON. Do not include any extra commentary or text.
+        if not os.getenv("OPENAI_API_KEY"):
+            raise EnvironmentError("OPENAI_API_KEY not set")
 
---- EXAMPLE FORMAT ---
-{{
-  "category": "Billing",
-  "priority": "High",
-  "intent": "Duplicate Invoice",
-  "recommended_queue": "Finance",
-  "confidence": 0.94
-}}
+    def preprocess(self, input_data: AgentInput) -> None:
+        if not input_data.get("content"):
+            raise ValueError("Missing message content")
 
---- MESSAGE INPUT START ---
-Sender: {sender}
-Product: {product}
-Subject: {subject}
-Content:
+    def run(self, input_data: AgentInput) -> AgentOutput:
+        try:
+            content = self._sanitize(input_data["content"])
+            prompt = self._build_prompt(content)
+
+            logger.info(f"[Classification] Prompt ready, sending to LLM")
+
+            response = self.client.ChatCompletion.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a customer support assistant that classifies incoming emails."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
+            )
+
+            reply = response["choices"][0]["message"]["content"].strip()
+            return self._parse_reply(reply)
+
+        except (AuthenticationError, RateLimitError, OpenAIError) as api_err:
+            logger.error(f"[OpenAI Error] {str(api_err)}")
+            raise
+        except Exception as e:
+            logger.exception("[ClassificationAgent] Unexpected error")
+            raise
+
+    def _build_prompt(self, content: str) -> str:
+        return f"""
+Classify the following message by returning a JSON object with these fields:
+- category: One of [Billing Support, Dispatch Communication, Sensor Alert, Marketing, General Inquiry]
+- intent: A short 1-3 word summary of the message's main intent
+- priority: One of [High, Medium, Low]
+- recommended_queue: One of [Finance Support, Dispatch Team, Ops Team, Automation, Customer Support]
+- confidence: Float between 0.0 and 1.0 representing your certainty
+
+Message:
+"""
 {content}
---- MESSAGE INPUT END ---
-""".strip()
+"""
+Return only the JSON. Do not explain."
+        
+    def _parse_reply(self, reply: str) -> AgentOutput:
+        try:
+            data = eval(reply) if reply.startswith('{') else {}
+            return {
+                "category": data.get("category", self.fallback_config["category"]),
+                "priority": data.get("priority", self.fallback_config["priority"]),
+                "intent": data.get("intent", self.fallback_config["intent"]),
+                "recommended_queue": data.get("recommended_queue", self.fallback_config["recommended_queue"]),
+                "confidence": float(data.get("confidence", self.fallback_config["confidence"])),
+                "fallback_used": False,
+                "error": None
+            }
+        except Exception as e:
+            logger.warning(f"[ClassificationAgent] Failed to parse LLM reply: {reply}")
+            raise
 
-# ---------- 2. Safe Response Parsing ----------
-def parse_response(reply: str) -> dict:
-    """
-    Safely parse the LLM's response into a Python dict.
-    """
-    try:
-        start = reply.find("{")
-        end = reply.rfind("}") + 1
-        json_str = reply[start:end]
-        parsed = json.loads(json_str)
-
-        required_keys = {"category", "priority", "intent", "recommended_queue", "confidence"}
-        if not required_keys.issubset(parsed.keys()):
-            raise ValueError("Missing required keys in response")
-
-        return parsed
-    except Exception as e:
-        logger.error(f"[LLM Parse Error] Raw response: {reply}")
-        raise RuntimeError(f"Failed to parse LLM response: {e}")
-
-# ---------- 3. LLM Classification Orchestration ----------
-def classify_message(msg: dict) -> dict:
-    """
-    Classify a message using OpenAI GPT-4 with structured JSON output.
-    """
-    prompt = build_prompt(msg)
-
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-4",
-            messages=[
-                {"role": "system", "content": "You are an AI triage assistant for DSQ Technology."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-            max_tokens=500
-        )
-
-        reply = response['choices'][0]['message']['content']
-        result = parse_response(reply)
-
-        logger.info(f"[LLM Classification] Result: {result}")
-        return result
-
-    except Exception as e:
-        logger.exception("LLM classification failed. Falling back to default classification.")
-        return {
-            "category": "General Inquiry",
-            "priority": "Medium",
-            "intent": "Unclear",
-            "recommended_queue": "Customer Support",
-            "confidence": 0.5,
-            "error": str(e)
-        }
+    def _sanitize(self, text: str) -> str:
+        return text.replace("\n", " ").strip()[:2000]
