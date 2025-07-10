@@ -1,23 +1,24 @@
 import React, { useState } from "react";
 
-function ErrorMessage({ message }) {
+function ErrorMessage({ message, id }) {
   const [isVisible, setIsVisible] = useState(true);
 
   if (!isVisible) return null;
 
   return (
     <div
-      className="mt-4 p-4 bg-red-100 border border-red-400 text-red-700 rounded flex justify-between items-center"
+      className="mt-4 p-4 bg-red-100 dark:bg-red-900 border border-red-400 dark:border-red-700 text-red-800 dark:text-red-200 rounded-lg flex justify-between items-center"
       role="alert"
       aria-live="assertive"
+      aria-describedby={id}
     >
-      <span>{message}</span>
+      <span className="text-sm">{message}</span>
       <button
         onClick={() => setIsVisible(false)}
-        className="text-red-700 hover:text-red-900 font-semibold"
+        className="text-red-800 dark:text-red-200 hover:text-red-900 dark:hover:text-red-100 font-semibold ml-4"
         aria-label="Dismiss error"
       >
-        &times;
+        ×
       </button>
     </div>
   );
