@@ -18,7 +18,7 @@ sentry-sdk==2.0.1              # Error reporting via Sentry
 # --- Security & Rate Limiting ---
 python-jose[cryptography]==3.3.0  # JWT-based authentication
 fastapi-limiter==0.1.5         # Redis-based rate limiting for FastAPI
-redis==5.0.4                   # Redis client for rate limiter
+redis==4.5.5                   # Redis client for rate limiter
 
 # --- Testing & Dev Tools ---
 httpx==0.27.0                  # Async HTTP client (for testing FastAPI)
