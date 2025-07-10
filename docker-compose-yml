@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-mock-openai-key}
+      - REACT_APP_API_BASE_URL=http://frontend:3000
+      - CURRENT_TIME=2025-07-10T13:08:00-04:00
+    volumes:
+      - ./app:/app
+      - ./.env:/app/.env
+    networks:
+      - triage-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - frontend
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_BASE_URL=http://backend:8000
+    volumes:
+      - ./frontend/src:/app/src
+    networks:
+      - triage-network
+    depends_on:
+      - backend
+
+networks:
+  triage-network:
+    driver: bridge
