@@ -21,6 +21,7 @@ function App() {
       content: "",
       product: "Discovery",
       channel: "email",
+      source: "gmail",
       metadata: {}
     }
   });
@@ -28,7 +29,8 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const onSubmit = async (data) => {
+  // Handle manual message submission via /triage endpoint
+  const onTriageSubmit = async (data) => {
     setLoading(true);
     setError(null);
     setResult(null);
@@ -46,9 +48,32 @@ function App() {
       setResult(res.data);
     } catch (err) {
       setError(
-        err.response?.data?.error ||
+        err.response?.data?.detail ||
         err.message ||
         "Failed to process message. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle ingestion submission via /ingest endpoint
+  const onIngestSubmit = async (data) => {
+    setLoading(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      const res = await axios.post(`${API_BASE_URL}/api/v1/messages/ingest`, {
+        source: data.source,
+        mock: true
+      });
+      setResult(res.data);
+    } catch (err) {
+      setError(
+        err.response?.data?.detail ||
+        err.message ||
+        "Failed to ingest message. Please try again."
       );
     } finally {
       setLoading(false);
@@ -64,7 +89,10 @@ function App() {
   return (
     <div className="p-6 max-w-2xl mx-auto font-sans">
       <h1 className="text-2xl font-bold mb-4">Triage Agent</h1>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      
+      {/* Manual Message Input Form */}
+      <form onSubmit={handleSubmit(onTriageSubmit)} className="space-y-4">
+        <h2 className="text-lg font-semibold mb-2">Manual Message Input</h2>
         <div>
           <label className="block text-sm font-medium mb-1">Message Content</label>
           <textarea
@@ -131,6 +159,30 @@ function App() {
             Reset
           </button>
         </div>
+      </form>
+
+      {/* Ingestion Form */}
+      <form onSubmit={handleSubmit(onIngestSubmit)} className="mt-6 space-y-4">
+        <h2 className="text-lg font-semibold mb-2">Ingest from Source</h2>
+        <div>
+          <label className="block text-sm font-medium mb-1">Source</label>
+          <select
+            {...register("source", { required: "Source is required" })}
+            className="w-full p-2 border rounded focus:ring-2 focus:ring-blue-600"
+          >
+            <option value="gmail">Gmail</option>
+            <option value="phone">Phone</option>
+          </select>
+          {errors.source && <ErrorMessage message={errors.source.message} />}
+        </div>
+
+        <button
+          type="submit"
+          className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 disabled:bg-green-300 flex items-center"
+          disabled={loading}
+        >
+          {loading ? <LoadingSpinner /> : "Ingest & Triage"}
+        </button>
       </form>
 
       {error && <ErrorMessage message={error} />}
