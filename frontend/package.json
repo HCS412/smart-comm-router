@@ -4,32 +4,26 @@
   "private": true,
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build"
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
   },
   "dependencies": {
     "axios": "^1.4.0",
     "axios-retry": "^4.0.0",
+    "framer-motion": "^10.18.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hook-form": "^7.51.0",
+    "react-icons": "^5.0.1",
     "react-progressbar": "^15.4.1",
     "react-scripts": "5.0.1"
   },
   "devDependencies": {},
   "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
+    "production": [">0.2%", "not dead", "not op_mini all"],
+    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
   },
-  "description": "React-based UI for the Triage Agent system, enabling message classification and response drafting.",
-  "notes": [
-    "Set REACT_APP_API_BASE_URL in .env to configure the backend API URL (defaults to http://localhost:8000)."
-  ]
+  "description": "React-based UI for the Triage Agent system, aligned with DSQ Technology branding.",
+  "notes": ["Set REACT_APP_API_BASE_URL in .env to configure the backend API URL (defaults to http://localhost:8000)."]
 }
