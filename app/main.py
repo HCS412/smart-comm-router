@@ -1,99 +1,108 @@
-# main.py
-
-import os
-from dotenv import load_dotenv
 from fastapi import FastAPI, Request, status
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.middleware.base import BaseHTTPMiddleware
-import uvicorn
+from fastapi.middleware.cors import CORSMiddleware
+from decouple import config, UndefinedValueError
+from app.utils.logger import logger
+from app.routes import messages, webhook
 import uuid
-import logging
-from app.routes import messages  # Modular route imports
-from app.utils.logger import configure_logger
+import os
 
-# Load environment
-load_dotenv()
+# Application metadata
+APP_NAME = "Smart Comm Router"
+APP_VERSION = "1.1.0"
+APP_DESCRIPTION = """
+Smart Comm Router is an AI-powered system for auto-triaging and drafting responses to incoming messages.
+It classifies messages by category, intent, priority, and queue, and generates tailored draft responses.
+Supports mock ingestion from Gmail and phone sources for demonstration purposes.
+"""
 
-# Configure logging
-logger = configure_logger()
-
-# Validate critical env vars
-if not os.getenv("OPENAI_API_KEY"):
-    raise EnvironmentError("OPENAI_API_KEY not set")
-
-# Metadata
-API_VERSION = "v1"
-APP_VERSION = "0.1.0"
-
-docs_url = f"/api/{API_VERSION}/docs"
-openapi_url = f"/api/{API_VERSION}/openapi.json"
-
+# Initialize FastAPI app
 app = FastAPI(
-    title="Triage Agent API",
-    description="Agent-based system for classifying, drafting, and triaging inbound messages.",
+    title=APP_NAME,
     version=APP_VERSION,
-    openapi_url=openapi_url,
-    docs_url=docs_url
+    description=APP_DESCRIPTION
 )
 
-# ---------------- CORS ------------------
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict this
+    allow_origins=[config("REACT_APP_API_BASE_URL", default="http://localhost:8000")],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"]
 )
 
-# -------------- Request ID Middleware ---------------
-class RequestIDMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        request.state.request_id = str(uuid.uuid4())
-        logger.info(f"[RequestID] {request.method} {request.url} | ID: {request.state.request_id}")
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request.state.request_id
-        return response
+# Request ID middleware for traceability
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    """Add a unique request ID to each request for logging."""
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    logger.info(f"[Request] New request | ID: {request_id} | Path: {request.url.path} | IP: {request.client.host}")
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
-app.add_middleware(RequestIDMiddleware)
+# Validate environment variables at startup
+def validate_environment():
+    """Validate required environment variables."""
+    required_vars = ["OPENAI_API_KEY"]
+    missing_vars = []
+    
+    for var in required_vars:
+        try:
+            config(var)
+        except UndefinedValueError:
+            missing_vars.append(var)
+    
+    if missing_vars:
+        error_msg = f"Missing required environment variables: {', '.join(missing_vars)}"
+        logger.error(f"[Startup] {error_msg}")
+        raise EnvironmentError(error_msg)
+    
+    # Log optional variables
+    react_api_url = config("REACT_APP_API_BASE_URL", default="http://localhost:8000")
+    logger.info(f"[Startup] REACT_APP_API_BASE_URL: {react_api_url}")
 
-# ----------------- Routes -------------------
-app.include_router(messages.router, prefix=f"/api/{API_VERSION}/messages", tags=["Messages"])
+# Include routers
+app.include_router(messages.router)
+app.include_router(webhook.router)
 
-# ----------------- Root Endpoint -------------------
-@app.get("/", summary="API Root", description="Root endpoint for Triage Agent API. Use /docs to explore full schema.")
-async def root():
-    return {
-        "service": "Triage Agent API",
-        "status": "running",
-        "version": APP_VERSION,
-        "docs": docs_url,
-        "openapi": openapi_url
-    }
+# Health check endpoint
+@app.get("/health", response_model=dict, status_code=status.HTTP_200_OK)
+async def health_check():
+    """
+    Health check endpoint to verify the application's status.
+    
+    Returns:
+        dict: Status information including app version and environment details.
+    """
+    try:
+        return {
+            "status": "healthy",
+            "app_name": APP_NAME,
+            "app_version": APP_VERSION,
+            "openai_key_configured": bool(config("OPENAI_API_KEY", default=None)),
+            "react_api_url": config("REACT_APP_API_BASE_URL", default="http://localhost:8000"),
+            "timestamp": os.environ.get("CURRENT_TIME", "2025-07-10T13:03:00-04:00")
+        }
+    except Exception as e:
+        logger.error(f"[HealthCheck] Failed: {str(e)}")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"status": "unhealthy", "error": str(e)}
+        )
 
-# ----------------- Health Check -------------------
-@app.get("/health", summary="Health Check", description="Verify application is alive and ready.")
-async def health():
-    return {"status": "ok"}
+# Startup event
+@app.on_event("startup")
+async def startup_event():
+    """Initialize the application and validate environment."""
+    logger.info(f"[Startup] Starting {APP_NAME} v{APP_VERSION}")
+    validate_environment()
+    logger.info("[Startup] Application initialized successfully")
 
-# --------------- Global Exception Handling ----------------
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    logger.warning(f"[HTTPException] {exc.detail}")
-    return JSONResponse(status_code=exc.status_code, content={"error": exc.detail})
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    logger.warning(f"[ValidationError] {exc.errors()}")
-    return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, content={"error": exc.errors()})
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    logger.error(f"[UnhandledError] {str(exc)}", exc_info=True)
-    return JSONResponse(status_code=500, content={"error": "Internal server error"})
-
-# ----------------- Entry Point --------------------
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_level="info")
+# Shutdown event
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up resources on shutdown."""
+    logger.info(f"[Shutdown] Stopping {APP_NAME} v{APP_VERSION}")
