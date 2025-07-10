@@ -1,6 +1,6 @@
 Smart Comm Router
 Overview
-The Smart Comm Router is an AI-powered system for auto-triaging and drafting responses to incoming messages, designed to streamline customer support workflows. It classifies messages by category, intent, priority, and queue, and generates tailored draft responses using a FastAPI backend and OpenAI's GPT-4 (mocked for demo purposes). The system supports mock ingestion from Gmail and phone sources, with a React frontend for user interaction. Built with scalability, reliability, and extensibility in mind, it includes robust error handling, logging, and unit tests, making it a production-ready prototype for demonstration.
+The Smart Comm Router is an AI-powered system for auto-triaging and drafting responses to incoming messages, designed to streamline customer support workflows. It classifies messages by category, intent, priority, and queue, and generates tailored draft responses using a FastAPI backend and OpenAI's GPT-4 (mocked for demo purposes). The system supports mock ingestion from Gmail and phone sources, with a React frontend for user interaction. Built with scalability, reliability, and extensibility in mind, it includes robust error handling, logging, unit tests, and Docker support, making it a production-ready prototype for demonstration.
 Key features:
 
 Message Classification: Categorizes messages (e.g., Billing, Dispatch) with confidence scores.
@@ -8,7 +8,7 @@ Draft Responses: Generates empathetic, context-aware replies based on classifica
 Mock Ingestion: Simulates Gmail and phone inputs for testing without real API credentials.
 Frontend UI: Provides a responsive interface for message submission and result visualization.
 Comprehensive Testing: Includes unit tests for backend routes and ingestion logic.
-Modular Design: Organized into agents, routes, services, and ingestion modules for easy extension.
+Dockerized Deployment: Simplifies setup with docker-compose.
 
 Architecture
 
@@ -17,16 +17,35 @@ Frontend: React with form validation, loading states, and visual confidence indi
 AI Agents: ClassificationAgent and DraftResponseAgent for LLM-based processing (mocked).
 Testing: Pytest-based unit tests for routes and ingestion.
 Logging: Structured logging with structlog for traceability.
+Deployment: Docker Compose for running backend and frontend services.
 
 Setup Instructions
 Prerequisites
 
-Python (3.9+)
-Node.js (v16+)
-npm (v8+)
+Docker and Docker Compose (for Dockerized setup)
+Python (3.9+) (for local setup)
+Node.js (v16+) and npm (v8+) (for local frontend setup)
 pip for Python package management
 
-Backend Setup
+Docker Setup (Recommended)
+
+Ensure Docker and Docker Compose are installed.
+Create a .env file in the root directory using .env.example:cp .env.example .env
+
+Update .env with:OPENAI_API_KEY=mock-openai-key
+
+
+Build and run the application:docker-compose up --build
+
+
+Access the app:
+Frontend: http://localhost:3000
+Backend API: http://localhost:8000
+Health check: http://localhost:8000/health
+
+
+
+Local Backend Setup
 
 Navigate to the root directory:
 cd smart-comm-router
@@ -39,7 +58,7 @@ pip install -r requirements.txt
 Create a .env file in the root directory using .env.example:
 cp .env.example .env
 
-Update .env with your OPENAI_API_KEY (use a mock key for demo, e.g., mock-openai-key).
+Update .env with your OPENAI_API_KEY (use mock-openai-key for demo).
 
 Start the backend server:
 uvicorn app.main:app --reload
@@ -47,7 +66,7 @@ uvicorn app.main:app --reload
 The API will be available at http://localhost:8000.
 
 
-Frontend Setup
+Local Frontend Setup
 
 Navigate to the frontend directory:cd frontend
 
@@ -77,9 +96,17 @@ Usage Guide
 Frontend UI
 
 Open http://localhost:3000 in your browser.
+Manual Input:
 Enter a sender email (e.g., user@example.com), optional subject, and message content (minimum 10 characters).
 Select a product (Discovery, Hauler, Pioneer).
 Click "Classify & Draft" to process via the /triage endpoint.
+
+
+Ingestion:
+Select a source (Gmail or Phone) from the dropdown.
+Click "Ingest & Triage" to process a mock message via the /ingest endpoint.
+
+
 View results:
 Classification: Category, intent, priority, queue, and confidence (with progress bar).
 Draft Response: AI-generated reply tailored to the message.
@@ -139,6 +166,17 @@ POST /api/v1/webhooks/incoming:Processes mock webhook payloads (e.g., Gmail, Twi
 
 Response: ClassificationResult.
 
+GET /health:Checks application status.Response:
+{
+  "status": "healthy",
+  "app_name": "Smart Comm Router",
+  "app_version": "1.1.0",
+  "openai_key_configured": true,
+  "react_api_url": "http://localhost:8000",
+  "timestamp": "2025-07-10T13:08:00-04:00"
+}
+
+
 
 Running Tests
 Unit tests verify backend routes and ingestion logic.
@@ -168,6 +206,8 @@ smart-comm-router/
 ├── tests/                # Unit tests for backend
 ├── .env.example          # Template for environment variables
 ├── requirements.txt       # Backend dependencies
+├── Dockerfile            # Backend Dockerfile
+├── docker-compose.yml    # Docker Compose configuration
 └── README.md             # Project documentation
 
 Contributing
@@ -180,9 +220,8 @@ Mock-Based Design: Extend mock ingestion in app/ingestion/ for new sources.
 Future Work
 
 Real Integrations: Add Gmail and Twilio APIs by updating gmail_client.py and twilio_client.py.
-Frontend Enhancements: Add source selector for /ingest in App.jsx.
-Testing: Include frontend tests with react-testing-library.
-Deployment: Containerize with Docker and deploy to AWS/GCP.
+Frontend Tests: Add tests with react-testing-library in frontend/src/__tests__/.
+Enhanced Logging: Integrate Prometheus metrics in app/utils/logger.py.
 Security: Implement API key validation and rate limiting in production.
 
 Notes
