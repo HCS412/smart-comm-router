@@ -5,8 +5,12 @@ FROM node:16
 WORKDIR /app
 
 # Copy package.json and install dependencies
-COPY package.json .
+COPY package.json ./
 RUN npm install
+
+# Copy Tailwind configuration
+COPY tailwind.config.js ./
+COPY postcss.config.js ./
 
 # Copy frontend code
 COPY . .
