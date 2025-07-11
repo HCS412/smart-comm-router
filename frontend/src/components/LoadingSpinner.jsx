@@ -1,10 +1,16 @@
 import React from "react";
+import { motion } from "framer-motion";
 
 function LoadingSpinner() {
   return (
-    <div className="flex items-center justify-center">
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
+      className="flex items-center justify-center"
+    >
       <svg
-        className="animate-spin h-6 w-6 text-blue-600 dark:text-blue-400"
+        className="animate-spin h-6 w-6 text-dsq-blue-600 dark:text-dsq-blue-400"
         xmlns="http://www.w3.org/2000/svg"
         fill="none"
         viewBox="0 0 24 24"
@@ -24,8 +30,8 @@ function LoadingSpinner() {
           d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
         ></path>
       </svg>
-      <span className="ml-2 text-sm font-medium text-gray-700 dark:text-gray-300">Loading...</span>
-    </div>
+      <span className="ml-2 text-sm font-medium text-dsq-gray-700 dark:text-gray-300">Loading...</span>
+    </motion.div>
   );
 }
 
