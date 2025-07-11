@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { motion } from "framer-motion";
 
 function ErrorMessage({ message, id }) {
   const [isVisible, setIsVisible] = useState(true);
@@ -6,8 +7,12 @@ function ErrorMessage({ message, id }) {
   if (!isVisible) return null;
 
   return (
-    <div
-      className="mt-4 p-4 bg-red-100 dark:bg-red-900 border border-red-400 dark:border-red-700 text-red-800 dark:text-red-200 rounded-lg flex justify-between items-center"
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      transition={{ duration: 0.3 }}
+      className="mt-4 p-4 bg-red-100 dark:bg-red-900 border border-red-400 dark:border-red-700 text-dsq-gray-700 dark:text-red-200 rounded-lg flex justify-between items-center"
       role="alert"
       aria-live="assertive"
       aria-describedby={id}
@@ -20,7 +25,7 @@ function ErrorMessage({ message, id }) {
       >
         ×
       </button>
-    </div>
+    </motion.div>
   );
 }
 
