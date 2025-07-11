@@ -1,35 +1,39 @@
 import React from "react";
+import { motion } from "framer-motion";
 import ProgressBar from "react-progressbar";
 
 function ClassificationResultCard({ result }) {
   const confidencePercentage = Math.round(result.confidence * 100);
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
       className="mt-6 p-6 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700"
       role="region"
       aria-label="Classification Result"
     >
-      <h2 className="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-200">Classification Result</h2>
+      <h2 className="text-2xl font-semibold mb-4 text-dsq-gray-700 dark:text-gray-200">Classification Result</h2>
       <ul className="space-y-3 text-sm">
         <li>
-          <span className="font-medium text-gray-700 dark:text-gray-300">Category:</span>{" "}
+          <span className="font-medium text-dsq-gray-700 dark:text-gray-300">Category:</span>{" "}
           <span>{result.category}</span>
         </li>
         <li>
-          <span className="font-medium text-gray-700 dark:text-gray-300">Priority:</span>{" "}
+          <span className="font-medium text-dsq-gray-700 dark:text-gray-300">Priority:</span>{" "}
           <span>{result.priority}</span>
         </li>
         <li>
-          <span className="font-medium text-gray-700 dark:text-gray-300">Intent:</span>{" "}
+          <span className="font-medium text-dsq-gray-700 dark:text-gray-300">Intent:</span>{" "}
           <span>{result.intent}</span>
         </li>
         <li>
-          <span className="font-medium text-gray-700 dark:text-gray-300">Queue:</span>{" "}
+          <span className="font-medium text-dsq-gray-700 dark:text-gray-300">Queue:</span>{" "}
           <span>{result.recommended_queue}</span>
         </li>
         <li>
-          <span className="font-medium text-gray-700 dark:text-gray-300">Confidence:</span>
+          <span className="font-medium text-dsq-gray-700 dark:text-gray-300">Confidence:</span>
           <div className="mt-2">
             <ProgressBar
               completed={confidencePercentage}
@@ -46,13 +50,13 @@ function ClassificationResultCard({ result }) {
               labelColor="#fff"
               labelSize="12px"
             />
-            <span className="text-xs text-gray-600 dark:text-gray-400 mt-1 block">
+            <span className="text-xs text-dsq-gray-700 dark:text-gray-400 mt-1 block">
               {confidencePercentage}%
             </span>
           </div>
         </li>
         <li>
-          <span className="font-medium text-gray-700 dark:text-gray-300">Fallback Used:</span>{" "}
+          <span className="font-medium text-dsq-gray-700 dark:text-gray-300">Fallback Used:</span>{" "}
           <span>{result.fallback_used ? "Yes" : "No"}</span>
         </li>
         {result.error && (
@@ -61,7 +65,7 @@ function ClassificationResultCard({ result }) {
           </li>
         )}
       </ul>
-    </div>
+    </motion.div>
   );
 }
 
